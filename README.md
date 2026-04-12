@@ -2,17 +2,21 @@
 
 > **Pre-commit security analysis** — block vulnerabilities before they're committed.
 
-Cybercrit is a hybrid-analysis CLI that runs as a git pre-commit hook, combining local static analysis (semgrep) with cloud LLM review to catch exploitable vulnerabilities in your code changes.
+Cybercrit is a hybrid-analysis CLI that runs as a git pre-commit hook, combining local static analysis with cloud LLM review to catch exploitable vulnerabilities in your code changes.
 
 ## Features
 
 - 🔍 **Two-phase analysis** — local semgrep scan + cloud LLM review
+- 🛟 **Zero-dep fallback** — 10 hardcoded regex rules (secrets, eval, SQL concat) run when semgrep is absent
 - ⚡ **Fast** — empty-diff fast path, sub-100ms for typical commits
 - 🔑 **BYOK** — bring your own API key (Groq, OpenAI compatible)
-- 🛡️ **Smart filtering** — extension blocklist, token budget truncation, confidence scoring
+- 🧠 **Cross-file context** — detects auth bypasses across middleware + routes via related file fetching
+- 🎯 **Smart filtering** — extension blocklist, token budget truncation, confidence scoring
 - 🎨 **Interactive TUI** — review findings, apply patches, view diffs with color
-- 📋 **Audit trail** — every decision logged to `audit.jsonl`
-- 🚫 **Commit blocking** — HIGH/CRITICAL findings block the commit
+- 📋 **Audit trail** — every decision logged to `~/.cybercrit/<repo>/audit.jsonl` (never committed)
+- 🚫 **Commit blocking** — ERROR/CRITICAL findings block the commit
+- 🔓 **Audited bypass** — `cybercrit bypass --reason "hotfix" --ttl 1` for emergency overrides
+- 📊 **Trend reporting** — `cybercrit report` shows severity trends, top rules, bypass history
 - 💬 **Suppression** — `// cybercrit-ignore` to skip known false positives
 
 ## Installation
@@ -27,6 +31,16 @@ cybercrit install
 # Remove the hook
 cybercrit uninstall
 ```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `cybercrit install` | Install git pre-commit hook |
+| `cybercrit uninstall` | Remove the hook |
+| `cybercrit scan` | Scan staged changes |
+| `cybercrit bypass --reason "..." --ttl 1` | One-time audited bypass |
+| `cybercrit report --days 30` | Security trend report |
 
 ## Configuration
 
@@ -50,8 +64,6 @@ max_file_size_kb = 512
 
 ## API Keys
 
-Set your API key via environment variable:
-
 ```sh
 export GROQ_API_KEY="your-key-here"
 # or
@@ -60,28 +72,19 @@ export OPENAI_API_KEY="your-key-here"
 export CYBERCRIT_API_KEY="your-key-here"
 ```
 
-## Usage
-
-```sh
-# Manual scan
-cybercrit scan
-
-# Automatic via pre-commit hook (after `cybercrit install`)
-git commit -m "your changes"  # cybercrit runs automatically
-```
-
 ## Architecture
 
 ```
 cmd/cybercrit/main.go       → entry point
-internal/cli/                → cobra commands (scan, install, uninstall)
+internal/cli/                → cobra commands (scan, install, uninstall, bypass, report)
 internal/diff/               → git diff --cached parser
 internal/config/             → TOML configuration loader
-internal/analyzer/           → semgrep runner, dedup, suppression
-internal/llm/                → LLM client, prompt builder, JSON parser
+internal/analyzer/           → semgrep runner, fallback regex rules, dedup, suppression
+internal/llm/                → LLM client, prompt builder, JSON parser, cross-file context
 internal/tui/                → bubbletea interactive reviewer
 internal/patch/              → git apply --cached patch engine
-internal/audit/              → JSONL audit logger
+internal/audit/              → JSONL audit logger (~/.cybercrit/)
+internal/bypass/             → one-time signed bypass tokens
 internal/hook/               → pre-commit hook file manager
 ```
 
