@@ -10,12 +10,17 @@ import (
 
 const systemPrompt = `You are a security-focused code reviewer. Analyze the following code diff for security vulnerabilities.
 
+You will receive:
+1. The code diff (added/removed lines)
+2. Related files for cross-file context (if available) — use these to detect auth bypasses, missing middleware, etc.
+
 RULES:
 1. Only report REAL, EXPLOITABLE vulnerabilities — not style issues.
 2. Focus on: injection, auth bypass, hardcoded secrets, path traversal, XSS, SSRF, insecure crypto, race conditions.
 3. Do NOT report: missing comments, formatting, naming conventions, or theoretical issues.
 4. Each finding MUST include a confidence score (0.0 to 1.0).
 5. If you can suggest a fix, provide a git-apply compatible patch.
+6. Use related files to detect CROSS-FILE vulnerabilities (e.g., route without auth middleware).
 
 You MUST respond with ONLY a JSON array. No markdown, no explanation, no wrapping.
 Each element must match this exact schema:
@@ -40,6 +45,11 @@ If no vulnerabilities are found, respond with: []`
 // maxTokens is the approximate token budget. We estimate ~4 chars per token.
 // If the diff exceeds the budget, we drop the lowest-complexity hunks first.
 func BuildUserPrompt(diffs []diff.FileDiff, maxTokens int) string {
+	return BuildUserPromptWithContext(diffs, nil, maxTokens)
+}
+
+// BuildUserPromptWithContext constructs the prompt with optional cross-file context.
+func BuildUserPromptWithContext(diffs []diff.FileDiff, relatedFiles []RelatedFile, maxTokens int) string {
 	if len(diffs) == 0 {
 		return "No code changes to review."
 	}
@@ -89,23 +99,47 @@ func BuildUserPrompt(diffs []diff.FileDiff, maxTokens int) string {
 	})
 
 	// Apply token budget (LLM-02): ~4 chars per token
-	charBudget := maxTokens * 4
+	// Reserve 20% of budget for related files context
+	contextBudget := 0
+	if len(relatedFiles) > 0 {
+		contextBudget = (maxTokens * 4) / 5 // 20% for context
+	}
+	diffBudget := (maxTokens * 4) - contextBudget
+
 	var selected []string
 	totalChars := 0
 
 	for _, p := range parts {
-		if totalChars+p.charCount > charBudget && len(selected) > 0 {
-			break // would exceed budget, stop adding
+		if totalChars+p.charCount > diffBudget && len(selected) > 0 {
+			break
 		}
 		selected = append(selected, p.content)
 		totalChars += p.charCount
 	}
 
-	return "Review the following code diff for security vulnerabilities:\n\n" +
-		strings.Join(selected, "\n")
+	var sb strings.Builder
+	sb.WriteString("Review the following code diff for security vulnerabilities:\n\n")
+	sb.WriteString(strings.Join(selected, "\n"))
+
+	// Append cross-file context if available
+	if len(relatedFiles) > 0 {
+		sb.WriteString("\n\n--- RELATED FILES (for cross-file context) ---\n\n")
+		contextChars := 0
+		for _, rf := range relatedFiles {
+			entry := fmt.Sprintf("// File: %s (reason: %s)\n%s\n\n", rf.Path, rf.Reason, rf.Content)
+			if contextChars+len(entry) > contextBudget && contextChars > 0 {
+				break
+			}
+			sb.WriteString(entry)
+			contextChars += len(entry)
+		}
+	}
+
+	return sb.String()
 }
 
 // SystemPrompt returns the system prompt for the LLM.
 func SystemPrompt() string {
 	return systemPrompt
 }
+

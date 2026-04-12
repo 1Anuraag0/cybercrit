@@ -21,6 +21,8 @@ vulnerabilities before they're committed.`,
 	cmd.AddCommand(newInstallCmd())
 	cmd.AddCommand(newUninstallCmd())
 	cmd.AddCommand(newScanCmd())
+	cmd.AddCommand(newBypassCmd())
+	cmd.AddCommand(newReportCmd())
 
 	return cmd
 }

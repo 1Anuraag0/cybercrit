@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/cybercrit/cybercrit/internal/analyzer"
 	"github.com/cybercrit/cybercrit/internal/audit"
+	"github.com/cybercrit/cybercrit/internal/bypass"
 	"github.com/cybercrit/cybercrit/internal/config"
 	"github.com/cybercrit/cybercrit/internal/diff"
 	"github.com/cybercrit/cybercrit/internal/llm"
@@ -39,6 +40,23 @@ func runScan(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load(wd)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Check for bypass token
+	token, _ := bypass.Consume(wd)
+	if token != nil {
+		fmt.Printf("⚠ bypass active (id: %s, reason: %q) — skipping analysis\n", token.ID, token.Reason)
+		// Log the bypass to audit trail
+		if logger, err := audit.NewLogger(wd); err == nil {
+			defer logger.Close()
+			_ = logger.Log(audit.Entry{
+				Action:   "bypass",
+				Message:  token.Reason,
+				RuleID:   "bypass-" + token.ID,
+				Severity: "INFO",
+			})
+		}
+		return nil
 	}
 
 	// Get staged diffs
@@ -95,7 +113,12 @@ func runScan(cmd *cobra.Command, args []string) error {
 		} else if client == nil {
 			fmt.Println("⚠ no API key found — skipping LLM analysis (set GROQ_API_KEY or OPENAI_API_KEY)")
 		} else {
-			userPrompt := llm.BuildUserPrompt(filtered, cfg.Phase2.MaxTokens)
+			// Fetch related files for cross-file context (Gap 4)
+			relatedFiles := llm.FetchRelatedFiles(filtered, wd)
+			if len(relatedFiles) > 0 {
+				fmt.Printf("  📎 %d related file(s) included for cross-file analysis\n", len(relatedFiles))
+			}
+			userPrompt := llm.BuildUserPromptWithContext(filtered, relatedFiles, cfg.Phase2.MaxTokens)
 			response, err := client.Complete(llm.SystemPrompt(), userPrompt)
 			if err != nil {
 				fmt.Printf("⚠ LLM error: %v (continuing without LLM analysis)\n", err)
