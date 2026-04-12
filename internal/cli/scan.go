@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/cybercrit/cybercrit/internal/analyzer"
 	"github.com/cybercrit/cybercrit/internal/config"
 	"github.com/cybercrit/cybercrit/internal/diff"
 	"github.com/spf13/cobra"
@@ -50,30 +51,99 @@ func runScan(cmd *cobra.Command, args []string) error {
 	var filtered []diff.FileDiff
 	for _, d := range diffs {
 		if cfg.IsBlocked(d.Path) {
-			continue // skip blocked extensions
+			continue
 		}
 		filtered = append(filtered, d)
 	}
 
-	// If everything was filtered out, exit clean
 	if len(filtered) == 0 {
 		return nil
 	}
 
-	// Print summary of staged files (placeholder for Phase 2/3 analysis)
-	elapsed := time.Since(start)
-	fmt.Printf("cybercrit: scanned %d file(s) in %s\n", len(filtered), elapsed.Round(time.Millisecond))
-	for _, d := range filtered {
-		adds := 0
-		for _, h := range d.Hunks {
-			for _, l := range h.Lines {
-				if l.Kind == diff.KindAdd {
-					adds++
-				}
+	// ─── Phase 1: Local Static Analysis ────────────────────────────
+
+	var findings []analyzer.Finding
+
+	if cfg.Phase1.Enabled {
+		if !analyzer.SemgrepAvailable() {
+			fmt.Println("⚠ semgrep not found — skipping local analysis (install: pip install semgrep)")
+		} else {
+			semgrepFindings, err := analyzer.RunSemgrep(filtered, wd)
+			if err != nil {
+				fmt.Printf("⚠ semgrep error: %v (continuing without local analysis)\n", err)
+			} else {
+				findings = append(findings, semgrepFindings...)
 			}
 		}
-		fmt.Printf("  %s (+%d lines)\n", d.Path, adds)
+	}
+
+	// Build suppression set from diff annotations
+	suppressed := analyzer.SuppressedLines(filtered)
+
+	// Filter suppressed lines
+	findings = analyzer.FilterSuppressed(findings, suppressed)
+
+	// Deduplicate
+	findings = analyzer.Deduplicate(findings)
+
+	// ─── Results ───────────────────────────────────────────────────
+
+	elapsed := time.Since(start)
+
+	if len(findings) == 0 {
+		fmt.Printf("cybercrit: scanned %d file(s) in %s — no issues found ✓\n",
+			len(filtered), elapsed.Round(time.Millisecond))
+		return nil
+	}
+
+	// Count by severity
+	counts := map[analyzer.Severity]int{}
+	for _, f := range findings {
+		counts[f.Severity]++
+	}
+
+	// Print findings
+	fmt.Printf("cybercrit: scanned %d file(s) in %s\n\n",
+		len(filtered), elapsed.Round(time.Millisecond))
+
+	for _, f := range findings {
+		icon := severityIcon(f.Severity)
+		fmt.Printf("  %s [%s] %s:%d — %s\n", icon, f.Severity, f.Path, f.Line, f.RuleID)
+		fmt.Printf("    %s\n\n", f.Message)
+	}
+
+	// Summary line
+	fmt.Printf("  %d finding(s)", len(findings))
+	if c := counts[analyzer.SeverityCritical]; c > 0 {
+		fmt.Printf(" · %d critical", c)
+	}
+	if c := counts[analyzer.SeverityError]; c > 0 {
+		fmt.Printf(" · %d error", c)
+	}
+	if c := counts[analyzer.SeverityWarning]; c > 0 {
+		fmt.Printf(" · %d warning", c)
+	}
+	fmt.Println()
+
+	// Block commit on HIGH/CRITICAL findings
+	blocking := counts[analyzer.SeverityError] + counts[analyzer.SeverityCritical]
+	if blocking > 0 {
+		fmt.Printf("\n  ✗ commit blocked: %d critical/high finding(s)\n", blocking)
+		return fmt.Errorf("commit blocked: %d critical/high findings", blocking)
 	}
 
 	return nil
+}
+
+func severityIcon(s analyzer.Severity) string {
+	switch s {
+	case analyzer.SeverityCritical:
+		return "🔴"
+	case analyzer.SeverityError:
+		return "🟠"
+	case analyzer.SeverityWarning:
+		return "🟡"
+	default:
+		return "🔵"
+	}
 }
