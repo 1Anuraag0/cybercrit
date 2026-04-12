@@ -20,6 +20,7 @@ vulnerabilities before they're committed.`,
 
 	cmd.AddCommand(newInstallCmd())
 	cmd.AddCommand(newUninstallCmd())
+	cmd.AddCommand(newScanCmd())
 
 	return cmd
 }
