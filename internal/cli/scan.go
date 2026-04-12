@@ -71,11 +71,15 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	if cfg.Phase1.Enabled {
 		if !analyzer.SemgrepAvailable() {
-			fmt.Println("⚠ semgrep not found — skipping local analysis (install: pip install semgrep)")
+			fmt.Println("⚠ semgrep not found — running fallback rules (install semgrep for full coverage)")
+			fallbackFindings := analyzer.RunFallback(filtered)
+			findings = append(findings, fallbackFindings...)
 		} else {
 			semgrepFindings, err := analyzer.RunSemgrep(filtered, wd)
 			if err != nil {
-				fmt.Printf("⚠ semgrep error: %v (continuing without local analysis)\n", err)
+				fmt.Printf("⚠ semgrep error: %v (falling back to regex rules)\n", err)
+				fallbackFindings := analyzer.RunFallback(filtered)
+				findings = append(findings, fallbackFindings...)
 			} else {
 				findings = append(findings, semgrepFindings...)
 			}
