@@ -23,6 +23,9 @@ vulnerabilities before they're committed.`,
 	cmd.AddCommand(newScanCmd())
 	cmd.AddCommand(newBypassCmd())
 	cmd.AddCommand(newReportCmd())
+	cmd.AddCommand(newReportCronCmd())
+	cmd.AddCommand(newLogSkipCmd())
+	cmd.AddCommand(newRulesCmd())
 
 	return cmd
 }

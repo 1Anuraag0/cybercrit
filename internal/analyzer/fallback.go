@@ -7,6 +7,15 @@ import (
 	"github.com/cybercrit/cybercrit/internal/diff"
 )
 
+// RulesVersion is the semantic version of the bundled fallback rule set.
+// Bump this when rules are added, modified, or patterns updated.
+const RulesVersion = "1.0.0"
+
+// RuleVersion returns the current bundled rules version.
+func RuleVersion() string {
+	return RulesVersion
+}
+
 // fallbackRule is a hardcoded regex-based detection pattern.
 // These run when semgrep is unavailable, providing a zero-dependency backstop.
 type fallbackRule struct {
@@ -148,4 +157,26 @@ func containsExt(exts []string, ext string) bool {
 		}
 	}
 	return false
+}
+
+// RuleInfo holds exported metadata about a fallback rule.
+type RuleInfo struct {
+	ID       string
+	Message  string
+	Severity Severity
+	FileExts []string
+}
+
+// ListRules returns metadata about all bundled fallback rules.
+func ListRules() []RuleInfo {
+	var rules []RuleInfo
+	for _, r := range fallbackRules {
+		rules = append(rules, RuleInfo{
+			ID:       r.ID,
+			Message:  r.Message,
+			Severity: r.Severity,
+			FileExts: r.FileExts,
+		})
+	}
+	return rules
 }
