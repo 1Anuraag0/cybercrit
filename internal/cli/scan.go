@@ -8,6 +8,7 @@ import (
 	"github.com/cybercrit/cybercrit/internal/analyzer"
 	"github.com/cybercrit/cybercrit/internal/config"
 	"github.com/cybercrit/cybercrit/internal/diff"
+	"github.com/cybercrit/cybercrit/internal/llm"
 	"github.com/spf13/cobra"
 )
 
@@ -77,6 +78,36 @@ func runScan(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// ─── Phase 2: LLM Analysis ────────────────────────────────────
+
+	if cfg.Phase2.Enabled {
+		client, err := llm.NewClient(cfg.Phase2.Provider, cfg.Phase2.Model, cfg.Phase2.TimeoutS)
+		if err != nil {
+			fmt.Printf("⚠ LLM setup error: %v (continuing without LLM analysis)\n", err)
+		} else if client == nil {
+			fmt.Println("⚠ no API key found — skipping LLM analysis (set GROQ_API_KEY or OPENAI_API_KEY)")
+		} else {
+			// Build prompt with token budget truncation (LLM-02)
+			userPrompt := llm.BuildUserPrompt(filtered, cfg.Phase2.MaxTokens)
+
+			// Call LLM with hard timeout (LLM-04)
+			response, err := client.Complete(llm.SystemPrompt(), userPrompt)
+			if err != nil {
+				fmt.Printf("⚠ LLM error: %v (continuing without LLM analysis)\n", err)
+			} else {
+				// Parse response with strict JSON schema (LLM-03) and confidence filter (LLM-05)
+				llmFindings, err := llm.ParseResponse(response, 0.70)
+				if err != nil {
+					fmt.Printf("⚠ LLM parse error: %v (continuing without LLM findings)\n", err)
+				} else {
+					findings = append(findings, llmFindings...)
+				}
+			}
+		}
+	}
+
+	// ─── Post-processing ──────────────────────────────────────────
+
 	// Build suppression set from diff annotations
 	suppressed := analyzer.SuppressedLines(filtered)
 
@@ -109,7 +140,14 @@ func runScan(cmd *cobra.Command, args []string) error {
 	for _, f := range findings {
 		icon := severityIcon(f.Severity)
 		fmt.Printf("  %s [%s] %s:%d — %s\n", icon, f.Severity, f.Path, f.Line, f.RuleID)
-		fmt.Printf("    %s\n\n", f.Message)
+		fmt.Printf("    %s\n", f.Message)
+		if f.Source == "llm" && f.Confidence > 0 {
+			fmt.Printf("    confidence: %.0f%%\n", f.Confidence*100)
+		}
+		if f.Patch != "" {
+			fmt.Printf("    💡 auto-fix available\n")
+		}
+		fmt.Println()
 	}
 
 	// Summary line
