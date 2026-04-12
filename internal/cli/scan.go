@@ -5,10 +5,14 @@ import (
 	"os"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/cybercrit/cybercrit/internal/analyzer"
+	"github.com/cybercrit/cybercrit/internal/audit"
 	"github.com/cybercrit/cybercrit/internal/config"
 	"github.com/cybercrit/cybercrit/internal/diff"
 	"github.com/cybercrit/cybercrit/internal/llm"
+	"github.com/cybercrit/cybercrit/internal/patch"
+	"github.com/cybercrit/cybercrit/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -87,15 +91,11 @@ func runScan(cmd *cobra.Command, args []string) error {
 		} else if client == nil {
 			fmt.Println("⚠ no API key found — skipping LLM analysis (set GROQ_API_KEY or OPENAI_API_KEY)")
 		} else {
-			// Build prompt with token budget truncation (LLM-02)
 			userPrompt := llm.BuildUserPrompt(filtered, cfg.Phase2.MaxTokens)
-
-			// Call LLM with hard timeout (LLM-04)
 			response, err := client.Complete(llm.SystemPrompt(), userPrompt)
 			if err != nil {
 				fmt.Printf("⚠ LLM error: %v (continuing without LLM analysis)\n", err)
 			} else {
-				// Parse response with strict JSON schema (LLM-03) and confidence filter (LLM-05)
 				llmFindings, err := llm.ParseResponse(response, 0.70)
 				if err != nil {
 					fmt.Printf("⚠ LLM parse error: %v (continuing without LLM findings)\n", err)
@@ -108,13 +108,8 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	// ─── Post-processing ──────────────────────────────────────────
 
-	// Build suppression set from diff annotations
 	suppressed := analyzer.SuppressedLines(filtered)
-
-	// Filter suppressed lines
 	findings = analyzer.FilterSuppressed(findings, suppressed)
-
-	// Deduplicate
 	findings = analyzer.Deduplicate(findings)
 
 	// ─── Results ───────────────────────────────────────────────────
@@ -133,7 +128,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		counts[f.Severity]++
 	}
 
-	// Print findings
+	// Print findings summary
 	fmt.Printf("cybercrit: scanned %d file(s) in %s\n\n",
 		len(filtered), elapsed.Round(time.Millisecond))
 
@@ -150,7 +145,6 @@ func runScan(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
-	// Summary line
 	fmt.Printf("  %d finding(s)", len(findings))
 	if c := counts[analyzer.SeverityCritical]; c > 0 {
 		fmt.Printf(" · %d critical", c)
@@ -162,6 +156,84 @@ func runScan(cmd *cobra.Command, args []string) error {
 		fmt.Printf(" · %d warning", c)
 	}
 	fmt.Println()
+
+	// ─── Interactive TUI (UI-01) ──────────────────────────────────
+
+	// Only launch TUI if there are patchable findings and we're in a terminal
+	hasPatch := false
+	for _, f := range findings {
+		if f.Patch != "" {
+			hasPatch = true
+			break
+		}
+	}
+
+	if hasPatch {
+		// Dry-run patches first (UI-04)
+		for i := range findings {
+			if findings[i].Patch != "" {
+				if err := patch.DryRun(wd, findings[i].Patch); err != nil {
+					// Patch would fail — clear it so TUI shows view-only
+					findings[i].Patch = ""
+				}
+			}
+		}
+
+		fmt.Println("\n  launching interactive review...")
+
+		model := tui.New(findings)
+		p := tea.NewProgram(model)
+		finalModel, err := p.Run()
+		if err != nil {
+			fmt.Printf("⚠ TUI error: %v\n", err)
+		} else {
+			m := finalModel.(tui.Model)
+			results := m.Results()
+
+			// Open audit logger (UI-03)
+			logger, logErr := audit.NewLogger(wd)
+			if logErr != nil {
+				fmt.Printf("⚠ audit log error: %v\n", logErr)
+			}
+			if logger != nil {
+				defer logger.Close()
+			}
+
+			// Process results
+			appliedCount := 0
+			for _, r := range results {
+				action := "skip"
+				if r.Action == tui.ActionApply && r.Finding.Patch != "" {
+					// Apply the patch (UI-02)
+					if err := patch.Apply(wd, r.Finding.Patch); err != nil {
+						fmt.Printf("  ⚠ patch failed for %s:%d — %v\n",
+							r.Finding.Path, r.Finding.Line, err)
+						action = "apply_failed"
+					} else {
+						appliedCount++
+						action = "apply"
+					}
+				}
+
+				// Log to audit file
+				if logger != nil {
+					_ = logger.Log(audit.Entry{
+						Action:   action,
+						RuleID:   r.Finding.RuleID,
+						Path:     r.Finding.Path,
+						Line:     r.Finding.Line,
+						Severity: r.Finding.Severity.String(),
+						Source:   r.Finding.Source,
+						Message:  r.Finding.Message,
+					})
+				}
+			}
+
+			if appliedCount > 0 {
+				fmt.Printf("  ✓ applied %d fix(es) to staged index\n", appliedCount)
+			}
+		}
+	}
 
 	// Block commit on HIGH/CRITICAL findings
 	blocking := counts[analyzer.SeverityError] + counts[analyzer.SeverityCritical]
