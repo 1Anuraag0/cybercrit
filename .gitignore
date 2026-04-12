@@ -1,0 +1,11 @@
+# Binary
+cybercrit.exe
+cybercrit
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
