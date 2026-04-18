@@ -17,3 +17,4 @@ func Deduplicate(findings []Finding) []Finding {
 
 	return unique
 }
+

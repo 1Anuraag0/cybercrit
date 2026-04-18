@@ -1,6 +1,6 @@
 module github.com/cybercrit/cybercrit
 
-go 1.26.2
+go 1.22.0
 
 require (
 	github.com/BurntSushi/toml v1.5.0

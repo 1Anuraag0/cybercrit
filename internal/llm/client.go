@@ -168,3 +168,4 @@ func (c *Client) Complete(systemPrompt, userPrompt string) (string, error) {
 
 	return chatResp.Choices[0].Message.Content, nil
 }
+

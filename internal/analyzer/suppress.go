@@ -61,3 +61,4 @@ func containsSuppress(s string) bool {
 func suppressKey(path string, line int) string {
 	return fmt.Sprintf("%s:%d", path, line)
 }
+

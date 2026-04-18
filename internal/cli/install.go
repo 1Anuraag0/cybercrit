@@ -25,3 +25,4 @@ func newInstallCmd() *cobra.Command {
 		},
 	}
 }
+

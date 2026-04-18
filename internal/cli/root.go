@@ -34,3 +34,4 @@ vulnerabilities before they're committed.`,
 func Execute() error {
 	return newRootCmd().Execute()
 }
+

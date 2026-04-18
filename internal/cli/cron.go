@@ -183,3 +183,4 @@ func uninstallCron() error {
 	fmt.Println("✓ cron job removed")
 	return nil
 }
+

@@ -71,3 +71,4 @@ func writeTempPatch(content string) (string, error) {
 
 	return f.Name(), nil
 }
+

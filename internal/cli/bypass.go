@@ -46,3 +46,4 @@ Unlike git commit --no-verify, this leaves an audit trail.`,
 
 	return cmd
 }
+

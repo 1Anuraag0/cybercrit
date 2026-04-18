@@ -9,3 +9,17 @@ cybercrit
 # OS
 .DS_Store
 Thumbs.db
+
+# Secrets
+.env
+
+# Test scripts
+scripts/
+
+# Agents
+.agents/
+.augment/
+skills-lock.json
+
+# Go vendor
+vendor/

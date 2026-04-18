@@ -101,3 +101,4 @@ func (c *Config) IsBlocked(filePath string) bool {
 	}
 	return false
 }
+

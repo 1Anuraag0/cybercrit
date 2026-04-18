@@ -253,3 +253,4 @@ func makeBar(count, total int) string {
 	}
 	return bar
 }
+

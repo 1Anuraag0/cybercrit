@@ -297,3 +297,4 @@ func severityStyle(s analyzer.Severity) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#3B82F6"))
 	}
 }
+

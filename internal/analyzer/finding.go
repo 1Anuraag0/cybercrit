@@ -61,3 +61,4 @@ type Finding struct {
 func (f Finding) Key() string {
 	return f.RuleID + ":" + f.Content
 }
+

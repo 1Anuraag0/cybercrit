@@ -175,3 +175,4 @@ func RunSemgrep(diffs []diff.FileDiff, repoRoot string) ([]Finding, error) {
 
 	return findings, nil
 }
+

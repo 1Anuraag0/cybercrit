@@ -284,3 +284,4 @@ func severityIcon(s analyzer.Severity) string {
 		return "🔵"
 	}
 }
+

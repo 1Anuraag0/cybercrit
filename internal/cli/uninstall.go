@@ -25,3 +25,4 @@ func newUninstallCmd() *cobra.Command {
 		},
 	}
 }
+

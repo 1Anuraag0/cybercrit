@@ -65,3 +65,4 @@ func Staged(repoRoot string) ([]FileDiff, error) {
 	}
 	return Parse(raw)
 }
+

@@ -145,3 +145,4 @@ func isValidPatch(patch string) bool {
 
 	return hasHunk
 }
+
