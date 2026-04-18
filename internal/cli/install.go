@@ -20,6 +20,19 @@ func newInstallCmd() *cobra.Command {
 			if err := hook.Write(wd); err != nil {
 				return err
 			}
+
+			// Add the default .cybercrit.toml template
+			configPath := wd + "/.cybercrit.toml"
+			if _, err := os.Stat(configPath); os.IsNotExist(err) {
+				template := `# Multi-agent inference config
+# inference = "hybrid"       # hybrid | local | cloud
+# local_model = "gemma3:4b"  # requires: ollama pull gemma3:4b
+# gemini_api_key = ""        # or: export GEMINI_API_KEY=...
+# openrouter_api_key = ""    # or: export OPENROUTER_API_KEY=...
+`
+				_ = os.WriteFile(configPath, []byte(template), 0644)
+			}
+
 			fmt.Println("✓ cybercrit pre-commit hook installed")
 			return nil
 		},

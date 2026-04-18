@@ -20,6 +20,12 @@ type Config struct {
 
 	// Filter controls which files are skipped.
 	Filter FilterConfig `toml:"filter"`
+
+	// LLM agent config
+	GeminiAPIKey     string `toml:"gemini_api_key"`
+	OpenRouterAPIKey string `toml:"openrouter_api_key"`
+	LocalModel       string `toml:"local_model"`
+	InferenceMode    string `toml:"inference"` // "hybrid" | "local" | "cloud"
 }
 
 // Phase1Config governs the local semgrep-based scanner.
@@ -67,6 +73,7 @@ func Default() Config {
 			},
 			MaxFileSizeKB: 512,
 		},
+		InferenceMode: "hybrid",
 	}
 }
 
@@ -89,6 +96,32 @@ func Load(dir string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func (c *Config) ResolveGeminiAPIKey() string {
+	if key := os.Getenv("GEMINI_API_KEY"); key != "" {
+		return key
+	}
+	if key := os.Getenv("CYBERCRIT_API_KEY"); key != "" {
+		return key
+	}
+	if c.GeminiAPIKey != "" {
+		return c.GeminiAPIKey
+	}
+	return ""
+}
+
+func (c *Config) ResolveOpenRouterAPIKey() string {
+	if key := os.Getenv("OPENROUTER_API_KEY"); key != "" {
+		return key
+	}
+	if key := os.Getenv("CYBERCRIT_API_KEY"); key != "" {
+		return key
+	}
+	if c.OpenRouterAPIKey != "" {
+		return c.OpenRouterAPIKey
+	}
+	return ""
 }
 
 // IsBlocked returns true if the given file path has a blocked extension.

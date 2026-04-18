@@ -55,6 +55,15 @@ type Finding struct {
 	Source     string   `json:"source"`     // "semgrep" or "llm"
 	Confidence float64  `json:"confidence"` // 0.0-1.0, used by LLM findings
 	Patch      string   `json:"patch"`      // git-apply compatible patch, if available
+
+	// LLM Metadata Extensions introduced by Multi-Agent Fallback Refactor
+	LLMID       string `json:"llm_id"`
+	VulnClass   string `json:"vuln_class"`
+	CWE         string `json:"cwe"`
+	AutoFixable bool   `json:"auto_fixable"`
+	FixedLine   string `json:"fixed_line"`
+	FixExplain  string `json:"fix_explain"`
+	LatencyMs   int64  `json:"latency_ms"`
 }
 
 // Key returns a deduplication key for this finding.

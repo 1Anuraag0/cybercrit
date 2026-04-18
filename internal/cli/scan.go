@@ -3,6 +3,8 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -107,28 +109,43 @@ func runScan(cmd *cobra.Command, args []string) error {
 	// ─── Phase 2: LLM Analysis ────────────────────────────────────
 
 	if cfg.Phase2.Enabled {
-		client, err := llm.NewClient(cfg.Phase2.Provider, cfg.Phase2.Model, cfg.Phase2.TimeoutS)
-		if err != nil {
-			fmt.Printf("⚠ LLM setup error: %v (continuing without LLM analysis)\n", err)
-		} else if client == nil {
-			fmt.Println("⚠ no API key found — skipping LLM analysis (set GROQ_API_KEY or OPENAI_API_KEY)")
-		} else {
-			// Fetch related files for cross-file context (Gap 4)
-			relatedFiles := llm.FetchRelatedFiles(filtered, wd)
-			if len(relatedFiles) > 0 {
-				fmt.Printf("  📎 %d related file(s) included for cross-file analysis\n", len(relatedFiles))
-			}
-			userPrompt := llm.BuildUserPromptWithContext(filtered, relatedFiles, cfg.Phase2.MaxTokens)
-			response, err := client.Complete(llm.SystemPrompt(), userPrompt)
-			if err != nil {
-				fmt.Printf("⚠ LLM error: %v (continuing without LLM analysis)\n", err)
-			} else {
-				llmFindings, err := llm.ParseResponse(response, 0.70)
-				if err != nil {
-					fmt.Printf("⚠ LLM parse error: %v (continuing without LLM findings)\n", err)
-				} else {
-					findings = append(findings, llmFindings...)
+		chain := llm.NewDefaultChain(cfg)
+		for _, d := range filtered {
+			var addedLinesBuilder strings.Builder
+			for _, hunk := range d.Hunks {
+				for _, l := range hunk.Lines {
+					if l.Kind == diff.KindAdd {
+						addedLinesBuilder.WriteString(l.Content + "\n")
+					}
 				}
+			}
+			addedLinesOnly := strings.TrimSpace(addedLinesBuilder.String())
+			if addedLinesOnly == "" {
+				continue
+			}
+
+			result, err := chain.Analyze(llm.AnalyzeRequest{
+				FilePath:   d.Path,
+				Language:   filepath.Ext(d.Path),
+				AddedLines: addedLinesOnly,
+				AddedCount: len(strings.Split(addedLinesOnly, "\n")),
+			})
+			if err != nil {
+				// all agents exhausted — warn but do NOT block the commit
+				fmt.Fprintf(os.Stderr, "[cybercrit] warning: analysis unavailable: %v\n", err)
+				break
+			}
+
+			// Add the agent latency summary printed line requested by user
+			fmt.Printf("  analyzed %s by %s in %dms\n", d.Path, result.AgentUsed, result.LatencyMs)
+
+			for _, f := range result.Findings {
+				af := toAnalyzerFinding(f, result.AgentUsed)
+				af.Path = d.Path
+				if af.RuleID == "" {
+					af.RuleID = f.VulnClass
+				}
+				findings = append(findings, af)
 			}
 		}
 	}
@@ -283,5 +300,35 @@ func severityIcon(s analyzer.Severity) string {
 	default:
 		return "🔵"
 	}
+}
+
+// toAnalyzerFinding maps an LLM wire-type finding to the domain type
+// used by the TUI, patch engine, and audit logger.
+func toAnalyzerFinding(f llm.Finding, agentUsed string) analyzer.Finding {
+	af := analyzer.Finding{
+		LLMID:       f.ID,
+		Severity:    analyzer.ParseSeverity(f.Severity),
+		VulnClass:   f.VulnClass,
+		Message:     f.Description,
+		Line:        f.LineNumber,
+		Content:     f.CodeSnippet,
+		Confidence:  f.Confidence,
+		CWE:         f.CWE,
+		Source:      agentUsed,
+	}
+
+	// CRITICAL: only mark auto-fixable if all three conditions are true:
+	// 1. agent explicitly set automated = true
+	// 2. a non-empty fixed_line was returned
+	// 3. agent is NOT regex-builtin (regex never has a valid patch)
+	if f.Fix.Automated &&
+		strings.TrimSpace(f.Fix.FixedLine) != "" &&
+		agentUsed != "regex-builtin" {
+		af.AutoFixable = true
+		af.FixedLine = f.Fix.FixedLine
+		af.FixExplain = f.Fix.Explanation
+	}
+
+	return af
 }
 
